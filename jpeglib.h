@@ -18,6 +18,7 @@
 #ifndef JPEGLIB_H
 #define JPEGLIB_H
 
+#define ALWAYS_HALIDE FALSE
 /*
  * First we include the configuration files that record how this
  * installation of the JPEG library is set up.  jconfig.h can be
@@ -246,7 +247,9 @@ typedef enum {
 typedef enum {
   JDCT_ISLOW,             /* slow but accurate integer algorithm */
   JDCT_IFAST,             /* faster, less accurate integer method */
-  JDCT_FLOAT              /* floating-point: accurate, fast on fast HW */
+  JDCT_FLOAT,              /* floating-point: accurate, fast on fast HW */
+  JDCT_ISLOW_HALIDE,
+  JDCT_IFAST_HALIDE
 } J_DCT_METHOD;
 
 #ifndef JDCT_DEFAULT            /* may be overridden in jconfig.h */
@@ -254,6 +257,13 @@ typedef enum {
 #endif
 #ifndef JDCT_FASTEST            /* may be overridden in jconfig.h */
 #define JDCT_FASTEST  JDCT_IFAST
+#endif
+
+#if ALWAYS_HALIDE
+#undef JDCT_DEFAULT
+#undef JDCT_FASTEST
+#define JDCT_DEFAULT  JDCT_IFAST_HALIDE
+#define JDCT_FASTEST  JDCT_IFAST_HALIDE
 #endif
 
 /* Dithering options for decompression. */

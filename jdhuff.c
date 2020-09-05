@@ -56,6 +56,7 @@ typedef struct {
 #endif
 #endif
 
+const int *jpeg_order;
 
 typedef struct {
   struct jpeg_entropy_decoder pub; /* public fields */
@@ -89,7 +90,7 @@ typedef huff_entropy_decoder *huff_entropy_ptr;
 /*
  * Initialize for a Huffman-compressed scan.
  */
-
+int should_use_halide(j_decompress_ptr cinfo);
 METHODDEF(void)
 start_pass_huff_decoder(j_decompress_ptr cinfo)
 {
@@ -102,10 +103,18 @@ start_pass_huff_decoder(j_decompress_ptr cinfo)
    * This ought to be an error condition, but we make it a warning because
    * there are some baseline files out there with all zeroes in these bytes.
    */
+
+  
   if (cinfo->Ss != 0 || cinfo->Se != DCTSIZE2 - 1 ||
       cinfo->Ah != 0 || cinfo->Al != 0)
     WARNMS(cinfo, JWRN_NOT_SEQUENTIAL);
 
+  if(should_use_halide(cinfo))
+    jpeg_order=jpeg_natural_order_t;
+  else
+    jpeg_order=jpeg_natural_order;
+
+  
   for (ci = 0; ci < cinfo->comps_in_scan; ci++) {
     compptr = cinfo->cur_comp_info[ci];
     dctbl = compptr->dc_tbl_no;
@@ -620,7 +629,7 @@ decode_mcu_slow(j_decompress_ptr cinfo, JBLOCKROW *MCU_data)
            * Note: the extra entries in jpeg_natural_order[] will save us
            * if k >= DCTSIZE2, which could happen if the data is corrupted.
            */
-          (*block)[jpeg_natural_order[k]] = (JCOEF)s;
+          (*block)[jpeg_order[k]] = (JCOEF)s;
         } else {
           if (r != 15)
             break;
@@ -706,7 +715,7 @@ decode_mcu_fast(j_decompress_ptr cinfo, JBLOCKROW *MCU_data)
           FILL_BIT_BUFFER_FAST
           r = GET_BITS(s);
           s = HUFF_EXTEND(r, s);
-          (*block)[jpeg_natural_order[k]] = (JCOEF)s;
+          (*block)[jpeg_order[k]] = (JCOEF)s;
         } else {
           if (r != 15) break;
           k += 15;

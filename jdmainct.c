@@ -447,9 +447,30 @@ jinit_d_main_controller(j_decompress_ptr cinfo, boolean need_full_buffer)
   } else {
     ngroups = cinfo->_min_DCT_scaled_size;
   }
-
+  
+//  printf("decode %dx%d\n",cinfo->image_width,cinfo->image_height);
+  /*
+  int sz=0;
+  int szg=0;
   for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
        ci++, compptr++) {
+         rgroup = (compptr->v_samp_factor * compptr->_DCT_scaled_size) /
+      cinfo->_min_DCT_scaled_size;
+      sz+=compptr->width_in_blocks * compptr->_DCT_scaled_size;
+      szg+=(rgroup * ngroups);
+  }
+  main_ptr->buffer[0] =  (*cinfo->mem->alloc_sarray)
+                        ((j_common_ptr) cinfo, JPOOL_IMAGE,sz,(JDIMENSION)(rgroup * ngroups));
+                        
+   for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components-1;
+       ci++, compptr++) {
+      rgroup = (compptr->v_samp_factor * compptr->_DCT_scaled_size) /
+      cinfo->_min_DCT_scaled_size; 
+       main_ptr->buffer[ci+1] = main_ptr->buffer[ci]+compptr->width_in_blocks * compptr->_DCT_scaled_size*(rgroup * ngroups);
+*/
+  for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
+       ci++, compptr++) {
+//    printf("decode %dx%d %d %d %d\n",cinfo->image_width,cinfo->image_height,ci,compptr->_DCT_scaled_size,cinfo->upsample->need_context_rows);
     rgroup = (compptr->v_samp_factor * compptr->_DCT_scaled_size) /
       cinfo->_min_DCT_scaled_size; /* height of a row group of component */
     main_ptr->buffer[ci] = (*cinfo->mem->alloc_sarray)

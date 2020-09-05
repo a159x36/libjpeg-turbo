@@ -440,7 +440,9 @@ enum TJERR {
   TJERR_FATAL
 };
 
+#define TJFLAG_HALIDE        8192
 
+#define TJFLAG_FLOATDCT   16384
 /**
  * The number of transform operations
  */

@@ -27,7 +27,9 @@ set(LIBJPEG_TURBO_VERSION_NUMBER ${VERSION_MAJOR}${VERSION_MINOR}${VERSION_REVIS
 
 string(TIMESTAMP DEFAULT_BUILD "%Y%m%d")
 set(BUILD ${DEFAULT_BUILD} CACHE STRING "Build string (default: ${DEFAULT_BUILD})")
+string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} CMAKE_SYSTEM_PROCESSOR_LC)
 
+set(HALIDE_OBJECTS halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_fast.o halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_slow.o)
 # NOTE: On Windows, this does nothing except when using MinGW or Cygwin.
 # CMAKE_BUILD_TYPE has no meaning in Visual Studio, and it always defaults to
 # Debug when using NMake.
@@ -40,7 +42,6 @@ message(STATUS "VERSION = ${VERSION}, BUILD = ${BUILD}")
 
 # Detect CPU type and whether we're building 64-bit or 32-bit code
 math(EXPR BITS "${CMAKE_SIZEOF_VOID_P} * 8")
-string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} CMAKE_SYSTEM_PROCESSOR_LC)
 if(CMAKE_SYSTEM_PROCESSOR_LC MATCHES "x86_64" OR
   CMAKE_SYSTEM_PROCESSOR_LC MATCHES "amd64" OR
   CMAKE_SYSTEM_PROCESSOR_LC MATCHES "i[0-9]86" OR
@@ -141,7 +142,7 @@ endmacro()
 
 option(ENABLE_SHARED "Build shared libraries" TRUE)
 boolean_number(ENABLE_SHARED)
-option(ENABLE_STATIC "Build static libraries" TRUE)
+option(ENABLE_STATIC "Build static libraries" FALSE)
 boolean_number(ENABLE_STATIC)
 option(REQUIRE_SIMD "Generate a fatal error if SIMD extensions are not available for this platform (default is to fall back to a non-SIMD build)" FALSE)
 boolean_number(REQUIRE_SIMD)
@@ -553,7 +554,7 @@ endif()
 
 if(ENABLE_STATIC)
   add_library(jpeg-static STATIC ${JPEG_SOURCES} $<TARGET_OBJECTS:simd>
-    ${SIMD_OBJS})
+    ${SIMD_OBJS} ${HALIDE_OBJECTS})
   if(NOT MSVC)
     set_target_properties(jpeg-static PROPERTIES OUTPUT_NAME jpeg)
   endif()
@@ -563,7 +564,7 @@ if(WITH_TURBOJPEG)
   if(ENABLE_SHARED)
     set(TURBOJPEG_SOURCES ${JPEG_SOURCES} $<TARGET_OBJECTS:simd> ${SIMD_OBJS}
       turbojpeg.c transupp.c jdatadst-tj.c jdatasrc-tj.c rdbmp.c rdppm.c
-      wrbmp.c wrppm.c)
+      wrbmp.c wrppm.c ${HALIDE_OBJECTS})
     set(TJMAPFILE ${CMAKE_CURRENT_SOURCE_DIR}/turbojpeg-mapfile)
     if(WITH_JAVA)
       set(TURBOJPEG_SOURCES ${TURBOJPEG_SOURCES} turbojpeg-jni.c)
@@ -594,7 +595,7 @@ if(WITH_TURBOJPEG)
     endif()
 
     add_executable(tjunittest tjunittest.c tjutil.c md5/md5.c md5/md5hl.c)
-    target_link_libraries(tjunittest turbojpeg)
+    target_link_libraries(tjunittest turbojpeg dl pthread)
 
     add_executable(tjbench tjbench.c tjutil.c)
     target_link_libraries(tjbench turbojpeg)
@@ -602,14 +603,18 @@ if(WITH_TURBOJPEG)
       target_link_libraries(tjbench m)
     endif()
 
+    if(CMAKE_SYSTEM_PROCESSOR_LC MATCHES "x86_64")
+      target_link_libraries(tjbench m dl pthread)
+    endif()
+
     add_executable(tjexample tjexample.c)
-    target_link_libraries(tjexample turbojpeg)
+    target_link_libraries(tjexample turbojpeg dl pthread)
   endif()
 
   if(ENABLE_STATIC)
     add_library(turbojpeg-static STATIC ${JPEG_SOURCES} $<TARGET_OBJECTS:simd>
       ${SIMD_OBJS} turbojpeg.c transupp.c jdatadst-tj.c jdatasrc-tj.c rdbmp.c
-      rdppm.c wrbmp.c wrppm.c)
+      rdppm.c wrbmp.c wrppm.c ${HALIDE_OBJECTS})
     set_property(TARGET turbojpeg-static PROPERTY COMPILE_FLAGS
       "-DBMP_SUPPORTED -DPPM_SUPPORTED")
     if(NOT MSVC)
@@ -618,10 +623,10 @@ if(WITH_TURBOJPEG)
 
     add_executable(tjunittest-static tjunittest.c tjutil.c md5/md5.c
       md5/md5hl.c)
-    target_link_libraries(tjunittest-static turbojpeg-static)
+    target_link_libraries(tjunittest-static turbojpeg-static dl pthread)
 
     add_executable(tjbench-static tjbench.c tjutil.c)
-    target_link_libraries(tjbench-static turbojpeg-static)
+    target_link_libraries(tjbench-static turbojpeg-static dl pthread)
     if(UNIX)
       target_link_libraries(tjbench-static m)
     endif()
@@ -643,15 +648,15 @@ if(ENABLE_STATIC)
   add_executable(cjpeg-static cjpeg.c cdjpeg.c rdgif.c rdppm.c rdswitch.c
     ${CJPEG_BMP_SOURCES})
   set_property(TARGET cjpeg-static PROPERTY COMPILE_FLAGS ${COMPILE_FLAGS})
-  target_link_libraries(cjpeg-static jpeg-static)
+  target_link_libraries(cjpeg-static jpeg-static dl pthread)
 
   add_executable(djpeg-static djpeg.c cdjpeg.c rdcolmap.c rdswitch.c wrgif.c
     wrppm.c ${DJPEG_BMP_SOURCES})
   set_property(TARGET djpeg-static PROPERTY COMPILE_FLAGS ${COMPILE_FLAGS})
-  target_link_libraries(djpeg-static jpeg-static)
+  target_link_libraries(djpeg-static jpeg-static dl pthread)
 
   add_executable(jpegtran-static jpegtran.c cdjpeg.c rdswitch.c transupp.c)
-  target_link_libraries(jpegtran-static jpeg-static)
+  target_link_libraries(jpegtran-static jpeg-static dl pthread)
   set_property(TARGET jpegtran-static PROPERTY COMPILE_FLAGS "${USE_SETMODE}")
 endif()
 

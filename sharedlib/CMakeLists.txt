@@ -23,6 +23,11 @@ foreach(src ${JPEG_SOURCES})
   set(JPEG_SRCS ${JPEG_SRCS} ../${src})
 endforeach()
 
+foreach(src ${HALIDE_OBJECTS})
+  set(HALIDE_OBJ ${HALIDE_OBJ} ../${src})
+endforeach()
+  
+
 if(WITH_SIMD AND (MSVC_IDE OR XCODE))
   # This tells CMake that the "source" files haven't been generated yet
   set_source_files_properties(${SIMD_OBJS} PROPERTIES GENERATED 1)
@@ -36,7 +41,7 @@ if(WIN32)
   endif()
 endif()
 add_library(jpeg SHARED ${JPEG_SRCS} ${DEFFILE} $<TARGET_OBJECTS:simd>
-  ${SIMD_OBJS})
+  ${SIMD_OBJS}  ${HALIDE_OBJ})
 
 set_target_properties(jpeg PROPERTIES SOVERSION ${SO_MAJOR_VERSION}
   VERSION ${SO_MAJOR_VERSION}.${SO_AGE}.${SO_MINOR_VERSION})
@@ -72,21 +77,21 @@ else()
 endif()
 
 add_executable(cjpeg ../cjpeg.c ../cdjpeg.c ../rdgif.c ../rdppm.c
-  ../rdswitch.c ${CJPEG_BMP_SOURCES})
+  ../rdswitch.c ${CJPEG_BMP_SOURCES} ${HALIDE_OBJ})
 set_property(TARGET cjpeg PROPERTY COMPILE_FLAGS ${COMPILE_FLAGS})
-target_link_libraries(cjpeg jpeg)
+target_link_libraries(cjpeg jpeg dl pthread)
 
 add_executable(djpeg ../djpeg.c ../cdjpeg.c ../rdcolmap.c ../rdswitch.c
-  ../wrgif.c ../wrppm.c ${DJPEG_BMP_SOURCES})
+  ../wrgif.c ../wrppm.c ${DJPEG_BMP_SOURCES} ${HALIDE_OBJ})
 set_property(TARGET djpeg PROPERTY COMPILE_FLAGS ${COMPILE_FLAGS})
-target_link_libraries(djpeg jpeg)
+target_link_libraries(djpeg jpeg dl pthread)
 
-add_executable(jpegtran ../jpegtran.c ../cdjpeg.c ../rdswitch.c ../transupp.c)
-target_link_libraries(jpegtran jpeg)
+add_executable(jpegtran ../jpegtran.c ../cdjpeg.c ../rdswitch.c ../transupp.c ${HALIDE_OBJ})
+target_link_libraries(jpegtran jpeg dl pthread)
 set_property(TARGET jpegtran PROPERTY COMPILE_FLAGS "${USE_SETMODE}")
 
-add_executable(jcstest ../jcstest.c)
-target_link_libraries(jcstest jpeg)
+add_executable(jcstest ../jcstest.c ${HALIDE_OBJ})
+target_link_libraries(jcstest jpeg dl pthread)
 
 install(TARGETS jpeg cjpeg djpeg jpegtran
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

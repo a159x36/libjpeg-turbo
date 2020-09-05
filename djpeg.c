@@ -249,6 +249,10 @@ parse_switches(j_decompress_ptr cinfo, int argc, char **argv,
         cinfo->dct_method = JDCT_IFAST;
       } else if (keymatch(argv[argn], "float", 2)) {
         cinfo->dct_method = JDCT_FLOAT;
+      } else if (keymatch(argv[argn], "fasthalide", 2)) {
+        cinfo->dct_method = JDCT_IFAST_HALIDE;
+      } else if (keymatch(argv[argn], "inthalide", 2)) {
+        cinfo->dct_method = JDCT_ISLOW_HALIDE;
       } else
         usage();
 

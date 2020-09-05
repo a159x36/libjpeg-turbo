@@ -354,6 +354,7 @@ EXTERN(void) jzero_far(void *target, size_t bytestozero);
 extern const int jpeg_zigzag_order[]; /* natural coef order to zigzag order */
 #endif
 extern const int jpeg_natural_order[]; /* zigzag coef order to natural order */
+extern const int jpeg_natural_order_t[]; /* zigzag coef order to natural order transposed */
 
 /* Arithmetic coding probability estimation tables in jaricom.c */
 extern const JLONG jpeg_aritab[];

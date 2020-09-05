@@ -75,7 +75,7 @@ int tjErrorLine = -1, tjErrorCode = -1;
   } \
 }
 
-int flags = TJFLAG_NOREALLOC, compOnly = 0, decompOnly = 0, doYUV = 0,
+int flags = TJFLAG_NOREALLOC, compOnly = 0, decompOnly = 0, doYUV = 0, doPSNR=1,
   quiet = 0, doTile = 0, pf = TJPF_BGR, yuvPad = 1, doWrite = 1;
 char *ext = "ppm";
 const char *pixFormatStr[TJ_NUMPF] = {
@@ -229,17 +229,69 @@ static int decomp(unsigned char *srcBuf, unsigned char **jpegBuf,
 
   if (tjDestroy(handle) == -1) THROW_TJ("executing tjDestroy()");
   handle = NULL;
+  double psnr=0;
+  int maxsqe=0;
+  if(srcBuf && sf.num == 1 && sf.denom == 1) {
+ if (subsamp == TJ_GRAYSCALE) {
+      unsigned long index, index2;
+      double sqe=0;
+      int err;
+      for (row = 0, index = 0; row < h; row++, index += pitch) {
+        for (col = 0, index2 = index; col < w; col++, index2 += ps) {
+          unsigned long rindex = index2 + tjRedOffset[pf];
+          unsigned long gindex = index2 + tjGreenOffset[pf];
+          unsigned long bindex = index2 + tjBlueOffset[pf];
+          int y = (int)((double)srcBuf[rindex] * 0.299 +
+                        (double)srcBuf[gindex] * 0.587 +
+                        (double)srcBuf[bindex] * 0.114 + 0.5);
 
+          if (y > 255) y = 255;
+          if (y < 0) y = 0;
+          err=(dstBuf[rindex]-y)*(dstBuf[rindex]-y);
+          sqe+=err;
+	        if(err>maxsqe) maxsqe=err;
+      
+        }
+      }
+      sqe=sqe/(h*w);
+//      printf("MSE=%f MAX=%d PSNR=%f\n",sqe,maxsqe,20*log10(255)-10*log10(sqe));
+      psnr=20*log10(255)-10*log10(sqe);
+    } else {
+      double sqe=0;
+      int err;
+      for (row = 0; row < h; row++)
+        for (col = 0; col < w * ps; col++) {
+          err =
+            (dstBuf[pitch * row + col] - srcBuf[pitch * row + col]);
+            err=err*err;
+          sqe+=err;
+          if(err>maxsqe) maxsqe=err;
+      }
+      sqe=sqe/(h*w*ps);
+//      printf("MSE=%f PSNR=%f\n",sqe,20*log10(255)-10*log10(sqe));
+      psnr=20*log10(255)-10*log10(sqe);
+
+
+    }
+    }
   if (quiet) {
     printf("%-6s%s",
            sigfig((double)(w * h) / 1000000. * (double)iter / elapsed, 4,
                   tempStr, 1024),
            quiet == 2 ? "\n" : "  ");
     if (doYUV)
-      printf("%s\n",
+      printf("%-8s",
              sigfig((double)(w * h) / 1000000. * (double)iter / elapsedDecode,
                     4, tempStr, 1024));
-    else if (quiet != 2) printf("\n");
+    if(doPSNR) {
+      printf("%-8s",
+             sigfig(maxsqe,
+                    2, tempStr, 1024));
+      printf("%-8s",
+             sigfig(psnr,
+                    16, tempStr, 1024));
+    }
+    if (quiet != 2) printf("\n");
   } else {
     printf("%s --> Frame rate:         %f fps\n",
            doYUV ? "Decomp to YUV" : "Decompress   ", (double)iter / elapsed);
@@ -274,7 +326,9 @@ static int decomp(unsigned char *srcBuf, unsigned char **jpegBuf,
     if (!quiet) printf("Compression error written to %s.\n", tempStr);
     if (subsamp == TJ_GRAYSCALE) {
       unsigned long index, index2;
-
+      double sqe=0;
+      int maxsqe=0;
+      int err;
       for (row = 0, index = 0; row < h; row++, index += pitch) {
         for (col = 0, index2 = index; col < w; col++, index2 += ps) {
           unsigned long rindex = index2 + tjRedOffset[pf];
@@ -286,16 +340,27 @@ static int decomp(unsigned char *srcBuf, unsigned char **jpegBuf,
 
           if (y > 255) y = 255;
           if (y < 0) y = 0;
+          err=(dstBuf[rindex]-y)*(dstBuf[rindex]-y);
+          sqe+=err;
+	  if(err>maxsqe) maxsqe=err;
           dstBuf[rindex] = abs(dstBuf[rindex] - y);
           dstBuf[gindex] = abs(dstBuf[gindex] - y);
           dstBuf[bindex] = abs(dstBuf[bindex] - y);
         }
       }
+      sqe=sqe/(h*w);
+//      printf("MSE=%f MAX=%d PSNR=%f\n",sqe,maxsqe,20*log10(255)-10*log10(sqe));
     } else {
+      double sqe=0;
       for (row = 0; row < h; row++)
-        for (col = 0; col < w * ps; col++)
+        for (col = 0; col < w * ps; col++) {
           dstBuf[pitch * row + col] =
             abs(dstBuf[pitch * row + col] - srcBuf[pitch * row + col]);
+          sqe+=dstBuf[pitch * row + col]*dstBuf[pitch * row + col];
+      }
+      sqe=sqe/(h*w*ps);
+//      printf("MSE=%f PSNR=%f\n",sqe,20*log10(255)-10*log10(sqe));
+
     }
     if (tjSaveImage(tempStr, dstBuf, w, 0, h, pf, flags) == -1)
       THROW_TJG("saving bitmap");
@@ -361,6 +426,10 @@ static int fullTest(unsigned char *srcBuf, int w, int h, int subsamp,
                           tjAlloc(tjBufSize(tilew, tileh, subsamp))) == NULL)
           THROW_UNIX("allocating JPEG tiles");
       }
+    int oldflags=flags;
+    flags |= TJFLAG_ACCURATEDCT;
+//    flags |= TJFLAG_FLOATDCT;
+//    flags &= ~(TJFLAG_FASTDCT | TJFLAG_ACCURATEDCT | TJFLAG_HALIDE);
 
     /* Compression test */
     if (quiet == 1)
@@ -425,6 +494,7 @@ static int fullTest(unsigned char *srcBuf, int w, int h, int subsamp,
         elapsed = elapsedEncode = 0.;
       }
     }
+    flags=oldflags;
     if (doYUV) elapsed -= elapsedEncode;
 
     if (tjDestroy(handle) == -1) THROW_TJ("executing tjDestroy()");
@@ -480,7 +550,7 @@ static int fullTest(unsigned char *srcBuf, int w, int h, int subsamp,
       fclose(file);  file = NULL;
       if (!quiet) printf("Reference image written to %s\n", tempStr);
     }
-
+//    printf("flags=%x\n",flags);
     /* Decompression test */
     if (!compOnly) {
       if (decomp(srcBuf, jpegBuf, jpegSize, tmpBuf, w, h, subsamp, jpegQual,
@@ -856,6 +926,12 @@ int main(int argc, char *argv[])
       } else if (!strcasecmp(argv[i], "-accuratedct")) {
         printf("Using most accurate DCT/IDCT algorithm\n\n");
         flags |= TJFLAG_ACCURATEDCT;
+      } else if (!strcasecmp(argv[i], "-floatdct")) {
+        printf("Using float DCT/IDCT algorithm\n\n");
+        flags |= TJFLAG_FLOATDCT;
+      } else if(!strcasecmp(argv[i], "-halide")) {
+        printf("Using halide for DCT/IDCT algorithm\n\n");
+        flags |= TJFLAG_HALIDE;
       } else if (!strcasecmp(argv[i], "-progressive")) {
         printf("Using progressive entropy coding\n\n");
         flags |= TJFLAG_PROGRESSIVE;
@@ -991,7 +1067,8 @@ int main(int argc, char *argv[])
     printf("Format     Subsamp  Qual  Width  Height  ");
     if (doYUV) printf("Perf    ");
     printf("Perf    Ratio   Perf    ");
-    if (doYUV) printf("Perf");
+    if (doYUV) printf("Perf    ");
+    if (doPSNR) printf("MAX     PSNR");
     printf("\n\n");
   }
 

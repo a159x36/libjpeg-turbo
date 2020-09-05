@@ -102,7 +102,7 @@ start_pass(j_decompress_ptr cinfo)
   int method = 0;
   inverse_DCT_method_ptr method_ptr = NULL;
   JQUANT_TBL *qtbl;
-
+//printf("start pass:%d\n",cinfo->num_components);
   for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
        ci++, compptr++) {
     /* Select the proper IDCT routine for this component's scaling */
@@ -151,15 +151,16 @@ start_pass(j_decompress_ptr cinfo)
     case DCTSIZE:
       switch (cinfo->dct_method) {
 #ifdef DCT_ISLOW_SUPPORTED
+      case JDCT_ISLOW_HALIDE:
       case JDCT_ISLOW:
         if (jsimd_can_idct_islow())
           method_ptr = jsimd_idct_islow;
         else
           method_ptr = jpeg_idct_islow;
-        method = JDCT_ISLOW;
         break;
 #endif
 #ifdef DCT_IFAST_SUPPORTED
+      case JDCT_IFAST_HALIDE:
       case JDCT_IFAST:
         if (jsimd_can_idct_ifast())
           method_ptr = jsimd_idct_ifast;
@@ -168,6 +169,8 @@ start_pass(j_decompress_ptr cinfo)
         method = JDCT_IFAST;
         break;
 #endif
+
+
 #ifdef DCT_FLOAT_SUPPORTED
       case JDCT_FLOAT:
         if (jsimd_can_idct_float())
@@ -248,7 +251,10 @@ start_pass(j_decompress_ptr cinfo)
          */
         ISLOW_MULT_TYPE *ismtbl = (ISLOW_MULT_TYPE *)compptr->dct_table;
         for (i = 0; i < DCTSIZE2; i++) {
-          ismtbl[i] = (ISLOW_MULT_TYPE)qtbl->quantval[i];
+          if(cinfo->dct_method==JDCT_ISLOW_HALIDE && !cinfo->progressive_mode)
+            ismtbl[(i%8)*8+(i/8)] = (ISLOW_MULT_TYPE)qtbl->quantval[i];
+          else
+            ismtbl[i] = (ISLOW_MULT_TYPE)qtbl->quantval[i];
         }
       }
       break;
@@ -276,13 +282,22 @@ start_pass(j_decompress_ptr cinfo)
            8867, 12299, 11585, 10426,  8867,  6967,  4799,  2446,
            4520,  6270,  5906,  5315,  4520,  3552,  2446,  1247
         };
-        SHIFT_TEMPS
+
+        int scalebits=IFAST_SCALE_BITS;
+        if(cinfo->dct_method==JDCT_IFAST_HALIDE && !cinfo->progressive_mode)
+          scalebits=4;
 
         for (i = 0; i < DCTSIZE2; i++) {
+          if(scalebits==4) 
+                      ifmtbl[(i%8)*8+(i/8)] = (IFAST_MULT_TYPE)
+            DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],
+                                  (JLONG)aanscales[i]),
+                    CONST_BITS - scalebits);
+          else
           ifmtbl[i] = (IFAST_MULT_TYPE)
             DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],
                                   (JLONG)aanscales[i]),
-                    CONST_BITS - IFAST_SCALE_BITS);
+                    CONST_BITS - scalebits);
         }
       }
       break;

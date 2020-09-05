@@ -22,7 +22,10 @@
 #include "jinclude.h"
 #include "jdcoefct.h"
 #include "jpegcomp.h"
-
+#include "halide/x86_64/idct_fast.h"
+#include "halide/x86_64/idct_slow.h"
+#include "halide/x86_64/idct4_slow.h"
+//#include "halide/x86_64/idct_float.h"
 
 /* Forward declarations */
 METHODDEF(int) decompress_onepass(j_decompress_ptr cinfo,
@@ -35,7 +38,6 @@ LOCAL(boolean) smoothing_ok(j_decompress_ptr cinfo);
 METHODDEF(int) decompress_smooth_data(j_decompress_ptr cinfo,
                                       JSAMPIMAGE output_buf);
 #endif
-
 
 /*
  * Initialize for an input processing pass.
@@ -81,6 +83,26 @@ start_output_pass(j_decompress_ptr cinfo)
  * which we index according to the component's SOF position.
  */
 
+int can_use_halide(j_decompress_ptr cinfo) {
+  int cando=TRUE;
+  int ci;
+
+ if(cinfo->upsample->need_context_rows)
+     return FALSE;
+  for(ci=0;ci < cinfo->comps_in_scan; ci++) {
+      jpeg_component_info *compptr=cinfo->cur_comp_info[ci];
+      if(compptr->_DCT_scaled_size!=8 /*&& compptr->_DCT_scaled_size!=4*/)
+          cando=FALSE;
+      if((compptr->h_samp_factor) < (compptr->v_samp_factor))
+          cando=FALSE;
+  }
+  return cando;
+}
+
+int should_use_halide(j_decompress_ptr cinfo) {
+	return (cinfo->dct_method == JDCT_IFAST_HALIDE || cinfo->dct_method == JDCT_ISLOW_HALIDE) && can_use_halide(cinfo);
+}
+
 METHODDEF(int)
 decompress_onepass(j_decompress_ptr cinfo, JSAMPIMAGE output_buf)
 {
@@ -88,71 +110,133 @@ decompress_onepass(j_decompress_ptr cinfo, JSAMPIMAGE output_buf)
   JDIMENSION MCU_col_num;       /* index of current MCU within row */
   JDIMENSION last_MCU_col = cinfo->MCUs_per_row - 1;
   JDIMENSION last_iMCU_row = cinfo->total_iMCU_rows - 1;
-  int blkn, ci, xindex, yindex, yoffset, useful_width;
+  int blkn, ci, xindex, yindex, yoffset=0, useful_width;
   JSAMPARRAY output_ptr;
   JDIMENSION start_col, output_col;
   jpeg_component_info *compptr;
   inverse_DCT_method_ptr inverse_DCT;
-
-  /* Loop to process as much as one whole iMCU row */
-  for (yoffset = coef->MCU_vert_offset; yoffset < coef->MCU_rows_per_iMCU_row;
-       yoffset++) {
+  
+  halide_dimension_t dims[4]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8,.stride=8},{.min=0,.stride=64},{.min=0,.extent=1,.stride=1}};
+  halide_dimension_t qdims[3]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8,.stride=8},{.min=0,.extent=1,.stride=1}};
+  halide_dimension_t outdims[4]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8},{.min=0,.stride=8},{.min=0,.extent=1,.stride=1}};
+  halide_buffer_t inbuffer={.dimensions=3,.dim=dims,.type.code=halide_type_int,.type.bits=16,.type.lanes=1};
+  halide_buffer_t quantbuffer={.dimensions=2,.dim=qdims,.type.code=halide_type_int,.type.bits=16,.type.lanes=1};
+  halide_buffer_t outbuffer={.dimensions=3,.dim=outdims,.type.code=halide_type_uint,.type.bits=8,.type.lanes=1};
+  
+  
+  if(should_use_halide(cinfo)) {
+    int blocks_per_row= cinfo->MCUs_per_row;
+    if(coef->MCU_ctr==0)
+        jzero_far((void *) coef->MCU_buffer[0],
+                  (size_t) (cinfo->blocks_in_MCU * sizeof(JBLOCK)*blocks_per_row));
+    JBLOCKROW block[D_MAX_BLOCKS_IN_MCU];
     for (MCU_col_num = coef->MCU_ctr; MCU_col_num <= last_MCU_col;
-         MCU_col_num++) {
-      /* Try to fetch an MCU.  Entropy decoder expects buffer to be zeroed. */
-      jzero_far((void *)coef->MCU_buffer[0],
-                (size_t)(cinfo->blocks_in_MCU * sizeof(JBLOCK)));
-      if (!(*cinfo->entropy->decode_mcu) (cinfo, coef->MCU_buffer)) {
-        /* Suspension forced; update state counters and exit */
-        coef->MCU_vert_offset = yoffset;
-        coef->MCU_ctr = MCU_col_num;
-        return JPEG_SUSPENDED;
-      }
+          MCU_col_num++) {
+         int blk=0,h,w;
+         for (ci = 0; ci < cinfo->comps_in_scan; ci++) {
+           compptr = cinfo->cur_comp_info[ci];
+           if(compptr->MCU_width==1) {
+             block[blk]=coef->MCU_buffer[blk]+MCU_col_num;
+           } else
+           for(h=0;h<compptr->MCU_height;h++)
+             for(w=0;w<compptr->MCU_width;w++) {
+              block[blk+w+h*compptr->MCU_width]=coef->MCU_buffer[blk]+h*blocks_per_row*compptr->MCU_width+MCU_col_num*compptr->MCU_width+w;
+             }
+          blk+=compptr->MCU_height*compptr->MCU_width;
+         }
+        if (! (*cinfo->entropy->decode_mcu) (cinfo, block)) {
+          /* Suspension forced; update state counters and exit */
+          coef->MCU_vert_offset = yoffset;
+          coef->MCU_ctr = MCU_col_num;
+          return JPEG_SUSPENDED;
+        }
+    }
+    int blk=0;
+    for (ci = 0; ci < cinfo->comps_in_scan; ci++) {
+      compptr = cinfo->cur_comp_info[ci];
+      output_ptr = output_buf[compptr->component_index];
+      inverse_DCT = cinfo->idct->inverse_DCT[compptr->component_index];
+      outdims[1].stride=output_ptr[1]-output_ptr[0];
+      int h;
+      outbuffer.host=(uint8_t*)(*output_ptr);
+      outdims[2].extent=(blocks_per_row)*compptr->MCU_width;
+      dims[2].extent=(blocks_per_row)*compptr->MCU_width;
 
-      /* Only perform the IDCT on blocks that are contained within the desired
-       * cropping region.
-       */
-      if (MCU_col_num >= cinfo->master->first_iMCU_col &&
-          MCU_col_num <= cinfo->master->last_iMCU_col) {
-        /* Determine where data should go in output_buf and do the IDCT thing.
-         * We skip dummy blocks at the right and bottom edges (but blkn gets
-         * incremented past them!).  Note the inner loop relies on having
-         * allocated the MCU_buffer[] blocks sequentially.
-         */
-        blkn = 0;               /* index of current DCT block within MCU */
-        for (ci = 0; ci < cinfo->comps_in_scan; ci++) {
-          compptr = cinfo->cur_comp_info[ci];
-          /* Don't bother to IDCT an uninteresting component. */
-          if (!compptr->component_needed) {
-            blkn += compptr->MCU_blocks;
-            continue;
-          }
-          inverse_DCT = cinfo->idct->inverse_DCT[compptr->component_index];
-          useful_width = (MCU_col_num < last_MCU_col) ?
-                         compptr->MCU_width : compptr->last_col_width;
-          output_ptr = output_buf[compptr->component_index] +
-                       yoffset * compptr->_DCT_scaled_size;
-          start_col = (MCU_col_num - cinfo->master->first_iMCU_col) *
-                      compptr->MCU_sample_width;
-          for (yindex = 0; yindex < compptr->MCU_height; yindex++) {
-            if (cinfo->input_iMCU_row < last_iMCU_row ||
-                yoffset + yindex < compptr->last_row_height) {
-              output_col = start_col;
-              for (xindex = 0; xindex < useful_width; xindex++) {
-                (*inverse_DCT) (cinfo, compptr,
-                                (JCOEFPTR)coef->MCU_buffer[blkn + xindex],
-                                output_ptr, output_col);
-                output_col += compptr->_DCT_scaled_size;
-              }
+      for(h=0;h<compptr->MCU_height;h++) {
+        inbuffer.host=(uint8_t*)coef->MCU_buffer[blk];
+        quantbuffer.host=(uint8_t*)compptr->dct_table;
+          if(cinfo->dct_method == JDCT_IFAST_HALIDE || cinfo->dct_method == JDCT_IFAST )
+              idct_fast(&inbuffer,&quantbuffer,&outbuffer);
+          else
+              idct_slow(&inbuffer,&quantbuffer,&outbuffer);
+        blk+=compptr->MCU_width;
+        outbuffer.host+=(compptr->_DCT_scaled_size*outdims[1].stride);
+      }
+      coef->MCU_ctr = 0;
+    }
+    
+  } else {
+    /* Loop to process as much as one whole iMCU row */
+    for (yoffset = coef->MCU_vert_offset; yoffset < coef->MCU_rows_per_iMCU_row;
+        yoffset++) {
+      for (MCU_col_num = coef->MCU_ctr; MCU_col_num <= last_MCU_col;
+          MCU_col_num++) {
+        /* Try to fetch an MCU.  Entropy decoder expects buffer to be zeroed. */
+        jzero_far((void *) coef->MCU_buffer[0],
+                  (size_t) (cinfo->blocks_in_MCU * sizeof(JBLOCK)));
+        if (! (*cinfo->entropy->decode_mcu) (cinfo, coef->MCU_buffer)) {
+          /* Suspension forced; update state counters and exit */
+          coef->MCU_vert_offset = yoffset;
+          coef->MCU_ctr = MCU_col_num;
+          return JPEG_SUSPENDED;
+        }
+
+        /* Only perform the IDCT on blocks that are contained within the desired
+        * cropping region.
+        */
+        if (MCU_col_num >= cinfo->master->first_iMCU_col &&
+            MCU_col_num <= cinfo->master->last_iMCU_col) {
+          /* Determine where data should go in output_buf and do the IDCT thing.
+          * We skip dummy blocks at the right and bottom edges (but blkn gets
+          * incremented past them!).  Note the inner loop relies on having
+          * allocated the MCU_buffer[] blocks sequentially.
+          */
+          blkn = 0;                 /* index of current DCT block within MCU */
+          for (ci = 0; ci < cinfo->comps_in_scan; ci++) {
+            compptr = cinfo->cur_comp_info[ci];
+            /* Don't bother to IDCT an uninteresting component. */
+            if (! compptr->component_needed) {
+              blkn += compptr->MCU_blocks;
+              continue;
             }
-            blkn += compptr->MCU_width;
-            output_ptr += compptr->_DCT_scaled_size;
+            inverse_DCT = cinfo->idct->inverse_DCT[compptr->component_index];
+            useful_width = (MCU_col_num < last_MCU_col) ? compptr->MCU_width
+                                                        : compptr->last_col_width;
+            output_ptr = output_buf[compptr->component_index] +
+              yoffset * compptr->_DCT_scaled_size;
+            start_col = (MCU_col_num - cinfo->master->first_iMCU_col) *
+                compptr->MCU_sample_width;
+
+            for (yindex = 0; yindex < compptr->MCU_height; yindex++) {
+              if (cinfo->input_iMCU_row < last_iMCU_row ||
+                  yoffset+yindex < compptr->last_row_height) {
+                output_col = start_col;
+                for (xindex = 0; xindex < useful_width; xindex++) {
+                  (*inverse_DCT) (cinfo, compptr,
+                                  (JCOEFPTR) coef->MCU_buffer[blkn+xindex],
+                                  output_ptr, output_col);
+                  output_col += compptr->_DCT_scaled_size;
+                }
+              }
+              blkn += compptr->MCU_width;
+              output_ptr += compptr->_DCT_scaled_size;
+            }
           }
         }
       }
+      /* Completed an MCU row, but perhaps not an iMCU row */
+      coef->MCU_ctr = 0;
     }
-    /* Completed an MCU row, but perhaps not an iMCU row */
-    coef->MCU_ctr = 0;
   }
   /* Completed the iMCU row, advance counters for next one */
   cinfo->output_iMCU_row++;
@@ -278,7 +362,6 @@ decompress_data(j_decompress_ptr cinfo, JSAMPIMAGE output_buf)
     if ((*cinfo->inputctl->consume_input) (cinfo) == JPEG_SUSPENDED)
       return JPEG_SUSPENDED;
   }
-
   /* OK, output from the virtual arrays. */
   for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
        ci++, compptr++) {
@@ -674,12 +757,25 @@ jinit_d_coef_controller(j_decompress_ptr cinfo, boolean need_full_buffer)
     JBLOCKROW buffer;
     int i;
 
-    buffer = (JBLOCKROW)
-      (*cinfo->mem->alloc_large) ((j_common_ptr)cinfo, JPOOL_IMAGE,
-                                  D_MAX_BLOCKS_IN_MCU * sizeof(JBLOCK));
-    for (i = 0; i < D_MAX_BLOCKS_IN_MCU; i++) {
-      coef->MCU_buffer[i] = buffer + i;
+    if(should_use_halide(cinfo)) {
+      int blocks_per_row=(JDIMENSION)
+      jdiv_round_up((long) cinfo->image_width,
+                    (long) (cinfo->max_h_samp_factor*DCTSIZE));
+        buffer = (JBLOCKROW)
+        (*cinfo->mem->alloc_large) ((j_common_ptr) cinfo, JPOOL_IMAGE,
+                                    D_MAX_BLOCKS_IN_MCU * sizeof(JBLOCK)*blocks_per_row);
+        for (i = 0; i < D_MAX_BLOCKS_IN_MCU; i++) {
+            coef->MCU_buffer[i] = buffer + i*blocks_per_row;
+        }
+    } else {
+        buffer = (JBLOCKROW)
+        (*cinfo->mem->alloc_large) ((j_common_ptr) cinfo, JPOOL_IMAGE,
+                                    D_MAX_BLOCKS_IN_MCU * sizeof(JBLOCK));
+        for (i = 0; i < D_MAX_BLOCKS_IN_MCU; i++) {
+            coef->MCU_buffer[i] = buffer + i;
+        }
     }
+    
     coef->pub.consume_data = dummy_consume_data;
     coef->pub.decompress_data = decompress_onepass;
     coef->pub.coef_arrays = NULL; /* flag for no virtual arrays */

@@ -1,0 +1,8 @@
+export JSIMD_FORCENONE=1
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -accuratedct
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -fastdct
+export JSIMD_FORCENONE=0
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -accuratedct
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -fastdct
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -accuratedct -halide
+./tjbench ../testimages/kitchen.bmp 95 -subsamp GRAY -quiet  -benchtime 0.001 -warmup 0.5 -nowrite -fastdct -halide

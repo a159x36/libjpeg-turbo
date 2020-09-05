@@ -649,6 +649,7 @@ jinit_forward_dct(j_compress_ptr cinfo)
       fdct->dct = jpeg_fdct_ifast;
     break;
 #endif
+
 #ifdef DCT_FLOAT_SUPPORTED
   case JDCT_FLOAT:
     fdct->pub.forward_DCT = forward_DCT_float;
