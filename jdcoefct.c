@@ -24,7 +24,6 @@
 #include "jpegcomp.h"
 #include "halide/x86_64/idct_fast.h"
 #include "halide/x86_64/idct_slow.h"
-#include "halide/x86_64/idct4_slow.h"
 //#include "halide/x86_64/idct_float.h"
 
 /* Forward declarations */

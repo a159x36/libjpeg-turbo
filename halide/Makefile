@@ -27,7 +27,7 @@ endef
 $(eval $(call haliderules,x86_64,host))
 $(eval $(call haliderules,aarch64,arm-64))
 $(eval $(call haliderules,armv7l,arm-32))
-HALIDE_OBJS=x86_64/idct_fast.o x86_64/idct_slow.o x86_64/idct4_slow.o
+HALIDE_OBJS=x86_64/idct_fast.o x86_64/idct_slow.o
 HALIDE_GENERATORS=idct_fast idct_slow
 .SECONDARY: $(HALIDE_GENERATORS)
 TJBENCHOPTS=-quiet  -benchtime 0.001 -warmup 0.01 -nowrite
