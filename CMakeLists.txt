@@ -29,7 +29,7 @@ string(TIMESTAMP DEFAULT_BUILD "%Y%m%d")
 set(BUILD ${DEFAULT_BUILD} CACHE STRING "Build string (default: ${DEFAULT_BUILD})")
 string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} CMAKE_SYSTEM_PROCESSOR_LC)
 
-set(HALIDE_OBJECTS halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_fast.o halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_slow.o)
+set(HALIDE_OBJECTS halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_fast.o halide/${CMAKE_SYSTEM_PROCESSOR_LC}/idct_slow.o halide/${CMAKE_SYSTEM_PROCESSOR_LC}/fdct_fast.o) 
 # NOTE: On Windows, this does nothing except when using MinGW or Cygwin.
 # CMAKE_BUILD_TYPE has no meaning in Visual Studio, and it always defaults to
 # Debug when using NMake.

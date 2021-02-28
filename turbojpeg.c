@@ -273,6 +273,11 @@ static int setCompDefaults(struct jpeg_compress_struct *cinfo, int pixelFormat,
       cinfo->dct_method = JDCT_ISLOW;
     else
       cinfo->dct_method = JDCT_FASTEST;
+    if (flags & TJFLAG_CHALIDE) {
+         if(flags&TJFLAG_FASTDCT)
+             cinfo->dct_method=JDCT_IFAST_HALIDE;
+    }
+
   }
   if (subsamp == TJSAMP_GRAY)
     jpeg_set_colorspace(cinfo, JCS_GRAYSCALE);

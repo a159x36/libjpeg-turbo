@@ -11,7 +11,7 @@ LLVM_FULL_VERSION = $(shell $(LLVM_CONFIG) --version)
 LLVM_SHARED_LIBS = -L $(LLVM_LIBDIR) 
 GENERATOR_SRC=$(HALIDE_SRC_PATH)/tools/GenGen.cpp
 CXX = clang++
-all: idct_slow idct_fast
+all: idct_slow idct_fast fdct_fast
 %:: %_generator.cpp
 	$(CXX) $(CXXFLAGS) $< $(GENERATOR_SRC) -g $(LIB_HALIDE) -o $@ -lpthread -fno-rtti -ldl -lz -lncurses -rdynamic $(LDFLAGS) $(LLVM_SHARED_LIBS)
 assembly: idct_fast idct_slow x86_64/idct_fast.s x86_64/idct_slow.s
@@ -27,18 +27,18 @@ endef
 $(eval $(call haliderules,x86_64,host))
 $(eval $(call haliderules,aarch64,arm-64))
 $(eval $(call haliderules,armv7l,arm-32))
-HALIDE_OBJS=x86_64/idct_fast.o x86_64/idct_slow.o
-HALIDE_GENERATORS=idct_fast idct_slow
+HALIDE_OBJS=x86_64/idct_fast.o x86_64/idct_slow.o x86_64/fdct_fast.o
+HALIDE_GENERATORS=idct_fast idct_slow fdct_fast
 .SECONDARY: $(HALIDE_GENERATORS)
 TJBENCHOPTS=-quiet  -benchtime 0.001 -warmup 0.01 -nowrite
 tjbench:
 	make -C $(BUILD_DIR) -j 8
 test420:  $(HALIDE_OBJS) tjbench
-	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp 420 $(TJBENCHOPTS) -fastdct -halide
+	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp 420 $(TJBENCHOPTS) -fastdct -halide -chalide
 test: $(HALIDE_OBJS) tjbench
 	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp GRAY $(TJBENCHOPTS) -accuratedct
 	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp GRAY $(TJBENCHOPTS) -fastdct
-	$(BUILD_DIR)/tjbench $(IMAGE)  95 -subsamp GRAY $(TJBENCHOPTS) -accuratedct -halide
-	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp GRAY $(TJBENCHOPTS) -fastdct -halide
+	$(BUILD_DIR)/tjbench $(IMAGE)  95 -subsamp GRAY $(TJBENCHOPTS) -accuratedct -halide -chalide
+	$(BUILD_DIR)/tjbench $(IMAGE) 95 -subsamp GRAY $(TJBENCHOPTS) -fastdct -halide -chalide
 clean:
 	rm */*.o $(HALIDE_GENERATORS)

@@ -21,6 +21,7 @@
 #include "jpeglib.h"
 #include "jdct.h"               /* Private declarations for DCT subsystem */
 #include "jsimddct.h"
+#include "halide/x86_64/fdct_fast.h"
 
 
 /* Private subobject for this module */
@@ -276,6 +277,7 @@ start_pass_fdctmgr(j_compress_ptr cinfo)
 #endif
 #ifdef DCT_IFAST_SUPPORTED
     case JDCT_IFAST:
+    case JDCT_IFAST_HALIDE:
       {
         /* For AA&N IDCT method, divisors are equal to quantization
          * coefficients scaled by scalefactor[row]*scalefactor[col], where
@@ -311,6 +313,20 @@ start_pass_fdctmgr(j_compress_ptr cinfo)
                         CONST_BITS - 3), &dtbl[i]) &&
               fdct->quantize == jsimd_quantize)
             fdct->quantize = quantize;
+      //    printf("%d %hi %hi %hi %d %d\n",i,dtbl[i],dtbl[i+DCTSIZE2],dtbl[i+DCTSIZE2*2],dtbl[i+DCTSIZE2*3],DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],
+      //                                (JLONG)aanscales[i]),
+      //                  CONST_BITS - 3));
+          if(cinfo->dct_method==JDCT_IFAST_HALIDE) {
+            int j=(i%8)*8+(i/8);
+            dtbl[i]=  //(DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],(JLONG)aanscales[i]),CONST_BITS - 3));
+            (((1<<(15+14-3+1-2))/(((JLONG)qtbl->quantval[j]*
+                                      (JLONG)aanscales[j]))+1)/2);
+                                      
+                                      //
+                         //             (DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],
+                           //           (JLONG)aanscales[i]),CONST_BITS - 3));
+          }
+
 #else
           dtbl[i] = (DCTELEM)
             DESCALE(MULTIPLY16V16((JLONG)qtbl->quantval[i],
@@ -505,18 +521,68 @@ forward_DCT(j_compress_ptr cinfo, jpeg_component_info *compptr,
   workspace = fdct->workspace;
 
   sample_data += start_row;     /* fold in the vertical offset once */
+  if(cinfo->dct_method == JDCT_IFAST_HALIDE) {
+    halide_dimension_t dims[4]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8,.stride=8},{.min=0,.stride=1, .extent=1},{.min=0,.extent=1,.stride=1}};
+    halide_dimension_t qdims[3]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8,.stride=8},{.min=0,.extent=1,.stride=1}};
+    halide_dimension_t outdims[4]={{.min=0,.extent=8,.stride=1},{.min=0,.extent=8, .stride=8},{.min=0,.stride=1, .extent=1},{.min=0,.extent=1,.stride=1}};
+    halide_buffer_t inbuffer={.dimensions=3,.dim=dims,.type.code=halide_type_uint,.type.bits=8,.type.lanes=1};
+    halide_buffer_t quantbuffer={.dimensions=2,.dim=qdims,.type.code=halide_type_int,.type.bits=16,.type.lanes=1};
+    halide_buffer_t outbuffer={.dimensions=3,.dim=outdims,.type.code=halide_type_int,.type.bits=16,.type.lanes=1};
+    
+    //printf("stride=%d\n",dims[1].stride);
+    inbuffer.dim[1].stride=(sample_data[1]-sample_data[0]);
+    outbuffer.host=(int16_t*)(workspace);
+    for (bi = 0; bi < num_blocks; bi++, start_col += DCTSIZE) {
+      inbuffer.host=sample_data[0]+start_col;
+     // (*do_convsamp) (sample_data, start_col, workspace);
+      fdct_fast(&inbuffer,&quantbuffer,&outbuffer);
+     //fdct_fast(&outbuffer,&quantbuffer,&outbuffer);
+      (*do_quantize) (coef_blocks[bi], divisors, workspace);
+    }
+  } else {
 
-  for (bi = 0; bi < num_blocks; bi++, start_col += DCTSIZE) {
-    /* Load data into workspace, applying unsigned->signed conversion */
-    (*do_convsamp) (sample_data, start_col, workspace);
+    for (bi = 0; bi < num_blocks; bi++, start_col += DCTSIZE) {
+      /* Load data into workspace, applying unsigned->signed conversion */
+      (*do_convsamp) (sample_data, start_col, workspace);
 
-    /* Perform the DCT */
-    (*do_dct) (workspace);
+      /* Perform the DCT */
+      (*do_dct) (workspace);
 
-    /* Quantize/descale the coefficients, and store into coef_blocks[] */
-    (*do_quantize) (coef_blocks[bi], divisors, workspace);
+      /* Quantize/descale the coefficients, and store into coef_blocks[] */
+      (*do_quantize) (coef_blocks[bi], divisors, workspace);
+    }
   }
 }
+
+
+void forward_DCT_quantize(j_compress_ptr cinfo, jpeg_component_info *compptr,
+            JSAMPARRAY sample_data, JBLOCKROW coef_blocks,
+            JDIMENSION start_row, JDIMENSION start_col, JDIMENSION num_blocks, DCTELEM *workspace)
+/* This version is used for integer DCT implementations. */
+{
+  /* This routine is heavily used, so it's worth coding it tightly. */
+  my_fdct_ptr fdct = (my_fdct_ptr)cinfo->fdct;
+  DCTELEM *divisors = fdct->divisors[compptr->quant_tbl_no];
+  
+ // JDIMENSION bi;
+
+  /* Make sure the compiler doesn't look up these every pass */
+  quantize_method_ptr do_quantize = fdct->quantize;
+
+  //sample_data += start_row;     /* fold in the vertical offset once */
+
+  //  for (bi = 0; bi < num_blocks; bi++, start_col += DCTSIZE) {
+      /* Quantize/descale the coefficients, and store into coef_blocks[] */
+      (*do_quantize) (coef_blocks[0], divisors, workspace);
+  //  }
+  
+}
+
+DCTELEM *getqtbl(j_compress_ptr cinfo, jpeg_component_info *compptr) {
+  my_fdct_ptr fdct = (my_fdct_ptr)cinfo->fdct;
+  return fdct->divisors[compptr->quant_tbl_no];
+}
+
 
 
 #ifdef DCT_FLOAT_SUPPORTED
@@ -633,6 +699,7 @@ jinit_forward_dct(j_compress_ptr cinfo)
   switch (cinfo->dct_method) {
 #ifdef DCT_ISLOW_SUPPORTED
   case JDCT_ISLOW:
+  case JDCT_ISLOW_HALIDE:
     fdct->pub.forward_DCT = forward_DCT;
     if (jsimd_can_fdct_islow())
       fdct->dct = jsimd_fdct_islow;
@@ -642,6 +709,7 @@ jinit_forward_dct(j_compress_ptr cinfo)
 #endif
 #ifdef DCT_IFAST_SUPPORTED
   case JDCT_IFAST:
+  case JDCT_IFAST_HALIDE:
     fdct->pub.forward_DCT = forward_DCT;
     if (jsimd_can_fdct_ifast())
       fdct->dct = jsimd_fdct_ifast;
@@ -671,6 +739,7 @@ jinit_forward_dct(j_compress_ptr cinfo)
 #endif
 #ifdef DCT_IFAST_SUPPORTED
   case JDCT_IFAST:
+  case JDCT_IFAST_HALIDE:
 #endif
 #if defined(DCT_ISLOW_SUPPORTED) || defined(DCT_IFAST_SUPPORTED)
     if (jsimd_can_convsamp())

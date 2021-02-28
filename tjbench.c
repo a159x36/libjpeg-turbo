@@ -427,7 +427,7 @@ static int fullTest(unsigned char *srcBuf, int w, int h, int subsamp,
           THROW_UNIX("allocating JPEG tiles");
       }
     int oldflags=flags;
-    flags |= TJFLAG_ACCURATEDCT;
+//    flags |= TJFLAG_ACCURATEDCT;
 //    flags |= TJFLAG_FLOATDCT;
 //    flags &= ~(TJFLAG_FASTDCT | TJFLAG_ACCURATEDCT | TJFLAG_HALIDE);
 
@@ -495,6 +495,10 @@ static int fullTest(unsigned char *srcBuf, int w, int h, int subsamp,
       }
     }
     flags=oldflags;
+    // uncomment to try different compress and decompress methods
+//    flags &= ~(TJFLAG_FASTDCT | TJFLAG_ACCURATEDCT | TJFLAG_HALIDE);
+//    flags |=TJFLAG_ACCURATEDCT | TJFLAG_HALIDE;
+
     if (doYUV) elapsed -= elapsedEncode;
 
     if (tjDestroy(handle) == -1) THROW_TJ("executing tjDestroy()");
@@ -930,8 +934,11 @@ int main(int argc, char *argv[])
         printf("Using float DCT/IDCT algorithm\n\n");
         flags |= TJFLAG_FLOATDCT;
       } else if(!strcasecmp(argv[i], "-halide")) {
-        printf("Using halide for DCT/IDCT algorithm\n\n");
+        printf("Using halide for IDCT algorithm\n\n");
         flags |= TJFLAG_HALIDE;
+      } else if(!strcasecmp(argv[i], "-chalide")) {
+        printf("Using halide for DCT algorithm\n\n");
+        flags |= TJFLAG_CHALIDE;
       } else if (!strcasecmp(argv[i], "-progressive")) {
         printf("Using progressive entropy coding\n\n");
         flags |= TJFLAG_PROGRESSIVE;
